@@ -174,6 +174,17 @@ def summarize_with_gemini(entries):
         return "🗞 Tin về Gemini & Claude hôm nay (chưa tóm tắt được):\n\n" + "\n\n".join(lines)
 
 
+import re
+
+
+def strip_markdown(text):
+    """Bỏ các ký tự định dạng Markdown vì tin nhắn giờ gửi dạng văn bản thường."""
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)  # bỏ ### header
+    text = text.replace("**", "").replace("*", "")               # bỏ in đậm
+    text = re.sub(r"^-{3,}\s*$", "", text, flags=re.MULTILINE)   # bỏ dòng --- phân cách
+    return text
+
+
 def send_to_telegram(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("[error] Thiếu TELEGRAM_BOT_TOKEN hoặc TELEGRAM_CHAT_ID.")
@@ -181,13 +192,13 @@ def send_to_telegram(text):
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
+    text = strip_markdown(text)
     chunks = [text[i:i + 3500] for i in range(0, len(text), 3500)] or [text]
 
     for chunk in chunks:
         r = requests.post(url, json={
             "chat_id": TELEGRAM_CHAT_ID,
             "text": chunk,
-            "parse_mode": "Markdown",
             "disable_web_page_preview": True,
         })
         if r.status_code != 200:
