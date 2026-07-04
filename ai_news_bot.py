@@ -135,7 +135,10 @@ def summarize_with_gemini(entries):
                         )
                     }]
                 }],
-                "generationConfig": {"maxOutputTokens": 800},
+                "generationConfig": {
+                    "maxOutputTokens": 2048,
+                    "thinkingConfig": {"thinkingBudget": 0},
+                },
             },
             timeout=60,
         )
