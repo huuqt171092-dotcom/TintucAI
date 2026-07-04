@@ -28,17 +28,31 @@ import requests
 import feedparser
 from datetime import datetime, timedelta, timezone
 
-# ---------- Cấu hình nguồn tin ----------
+# ---------- Cấu hình nguồn tin (tiếng Việt) ----------
+# Mỗi mục: (url_feed, da_chuyen_ve_AI)
+# - da_chuyen_ve_AI=True  -> feed đã chuyên về AI, lấy toàn bộ tin
+# - da_chuyen_ve_AI=False -> feed công nghệ nói chung, cần lọc từ khóa AI
 RSS_FEEDS = [
-    "https://techcrunch.com/category/artificial-intelligence/feed/",
-    "https://venturebeat.com/category/ai/feed/",
-    "https://www.technologyreview.com/topic/artificial-intelligence/feed",
-    "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
-    "https://news.google.com/rss/search?q=AI%20artificial%20intelligence&hl=en-US&gl=US&ceid=US:en",
+    ("https://genk.vn/rss/ai.rss", True),                        # GenK - chuyên mục AI
+    ("https://vnexpress.net/rss/khoa-hoc-cong-nghe.rss", False), # VnExpress Khoa học công nghệ
+    ("https://tinhte.vn/rss/", False),                            # Tinh Tế
+    ("https://news.google.com/rss/search?q=AI%20tr%C3%AD%20tu%E1%BB%87%20nh%C3%A2n%20t%E1%BA%A1o&hl=vi&gl=VN&ceid=VN:vi", True),  # Google News tiếng Việt, từ khóa AI
+]
+
+# Từ khóa dùng để lọc tin AI từ các nguồn công nghệ nói chung
+AI_KEYWORDS = [
+    "ai", "trí tuệ nhân tạo", "chatbot", "machine learning",
+    "học máy", "gpt", "claude", "gemini", "openai", "anthropic",
+    "deepseek", "llm", "mô hình ngôn ngữ", "generative ai",
 ]
 
 HOURS_LOOKBACK = 24  # chỉ lấy tin trong N giờ gần nhất
 MAX_ITEMS = 15        # giới hạn số tin đưa vào tóm tắt
+
+
+def is_ai_related(title, summary):
+    text = f"{title} {summary}".lower()
+    return any(kw in text for kw in AI_KEYWORDS)
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -50,7 +64,7 @@ def fetch_recent_entries():
     cutoff = datetime.now(timezone.utc) - timedelta(hours=HOURS_LOOKBACK)
     entries = []
 
-    for url in RSS_FEEDS:
+    for url, is_dedicated in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
         except Exception as e:
@@ -66,10 +80,17 @@ def fetch_recent_entries():
             if published is None or published < cutoff:
                 continue
 
+            title = e.get("title", "").strip()
+            summary_raw = e.get("summary", "")[:500]
+
+            # Với feed công nghệ nói chung, chỉ giữ tin liên quan đến AI
+            if not is_dedicated and not is_ai_related(title, summary_raw):
+                continue
+
             entries.append({
-                "title": e.get("title", "").strip(),
+                "title": title,
                 "link": e.get("link", "").strip(),
-                "summary": e.get("summary", "")[:500],
+                "summary": summary_raw,
                 "source": feed.feed.get("title", url),
                 "published": published,
             })
