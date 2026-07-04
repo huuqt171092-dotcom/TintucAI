@@ -1,9 +1,9 @@
-# Bot tin tức Gemini hàng ngày → Telegram
+# Bot tin tức Gemini & Claude hàng ngày → Telegram
 
-M��i ngày tự động lấy tin về **Google Gemini** mới nhất (24h qua) từ các
-trang tin tiếng Việt uy tín (GenK, VnExpress, Tinh Tế, Google News tiếng
-Việt), tóm tắt bằng Gemini API, rồi gửi vào Telegram của bạn — hoàn toàn
-miễn phí, không cần điện thoại phải mở app hay máy tính phải bật.
+Mỗi ngày tự động lấy tin về tính năng mới của **Google Gemini** và
+**Anthropic Claude** (48h qua) từ các nguồn tiếng Việt và quốc tế uy tín,
+tóm tắt lại bằng tiếng Việt qua Gemini API, rồi gửi vào Telegram của bạn —
+hoàn toàn miễn phí, không cần điện thoại phải mở app hay máy tính phải bật.
 
 ## Bước 1: Tạo Telegram Bot (2 phút)
 
@@ -66,21 +66,27 @@ lấy tin trực tiếp từ các trang báo công nghệ uy tín — vừa an t
 
 ## Nguồn tin hiện tại
 
+Nguồn tiếng Việt:
 - **GenK - chuyên mục AI** (`genk.vn/rss/ai.rss`)
 - **VnExpress Khoa học công nghệ**
 - **Tinh Tế**
-- **Google News tiếng Việt** (tìm "Gemini Google AI")
+- **Google News tiếng Việt** (tìm "Gemini OR Claude AI")
 
-Tất cả các nguồn trên đều được lọc lại theo từ khóa Gemini (`GEMINI_KEYWORDS`
-trong code) để chỉ giữ tin thực sự liên quan đến Gemini, không lấy AI nói
-chung nữa.
+Nguồn quốc tế (được Gemini dịch và tóm tắt sang tiếng Việt):
+- **TechCrunch** (chuyên mục AI)
+- **VentureBeat** (chuyên mục AI)
+- **The Verge** (chuyên mục AI)
+- **Google News tiếng Anh** (tìm "Gemini OR Claude AI feature")
+
+Tất cả các nguồn trên đều được lọc lại theo từ khóa liên quan đến Gemini
+và Claude (`TOPIC_KEYWORDS` trong code) để chỉ giữ tin thực sự liên quan.
 
 ## Tùy biến
 
 - Thêm/bớt nguồn tin: sửa danh sách `RSS_FEEDS` trong `ai_news_bot.py`.
-- Thêm/bớt từ khóa lọc: sửa danh sách `GEMINI_KEYWORDS` (ví dụ thêm "veo",
+- Thêm/bớt từ khóa lọc: sửa danh sách `TOPIC_KEYWORDS` (ví dụ thêm "veo",
   "imagen", "notebooklm" nếu muốn bắt luôn tin về các sản phẩm liên quan).
-- Đổi số giờ lấy tin: sửa `HOURS_LOOKBACK`.
+- Đổi số giờ lấy tin: sửa `HOURS_LOOKBACK` (mặc định 48 giờ).
 - Đổi số lượng tin tối đa: sửa `MAX_ITEMS`.
 - Đổi model Gemini dùng để tóm tắt: sửa `GEMINI_MODEL` (mặc định
   `gemini-2.5-flash`, nhanh và miễn phí trong hạn mức).
