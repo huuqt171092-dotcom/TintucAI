@@ -1,8 +1,8 @@
 """
-AI News Daily Bot
-------------------
-Lấy tin tức AI mới nhất (24h qua) từ các nguồn RSS uy tín, tóm tắt bằng
-Claude API, rồi gửi kết quả vào Telegram của bạn.
+Gemini News Daily Bot
+----------------------
+Lấy tin tức về Google Gemini mới nhất (24h qua) từ các nguồn RSS tiếng Việt
+uy tín, tóm tắt bằng Gemini API, rồi gửi kết quả vào Telegram của bạn.
 
 Không dùng Facebook vì:
 - Facebook không cho phép bot tự động đăng nhập / cào News Feed cá nhân
@@ -14,7 +14,7 @@ Cách chạy thử trên máy của bạn:
     pip install -r requirements.txt
     export TELEGRAM_BOT_TOKEN="xxx"
     export TELEGRAM_CHAT_ID="xxx"
-    export ANTHROPIC_API_KEY="xxx"   # tùy chọn, để tóm tắt hay hơn
+    export GEMINI_API_KEY="xxx"   # tùy chọn, để tóm tắt hay hơn
     python ai_news_bot.py
 
 Xem README.md để biết cách lấy các giá trị trên và cách cho chạy
@@ -30,41 +30,45 @@ from datetime import datetime, timedelta, timezone
 
 # ---------- Cấu hình nguồn tin (tiếng Việt) ----------
 # Mỗi mục: (url_feed, da_chuyen_ve_AI)
-# - da_chuyen_ve_AI=True  -> feed đã chuyên về AI, lấy toàn bộ tin
-# - da_chuyen_ve_AI=False -> feed công nghệ nói chung, cần lọc từ khóa AI
+# - da_chuyen_ve_AI=True  -> feed đã chuyên về AI, cần lọc theo từ khóa Gemini
+# - da_chuyen_ve_AI=False -> feed công nghệ nói chung, cũng lọc theo từ khóa Gemini
+# (mọi feed đều được lọc lại theo GEMINI_KEYWORDS bên dưới, is_dedicated chỉ
+#  còn ý nghĩa tham khảo, giữ lại để dễ mở rộng sau này)
 RSS_FEEDS = [
     ("https://genk.vn/rss/ai.rss", True),                        # GenK - chuyên mục AI
     ("https://vnexpress.net/rss/khoa-hoc-cong-nghe.rss", False), # VnExpress Khoa học công nghệ
     ("https://tinhte.vn/rss/", False),                            # Tinh Tế
-    ("https://news.google.com/rss/search?q=AI%20tr%C3%AD%20tu%E1%BB%87%20nh%C3%A2n%20t%E1%BA%A1o&hl=vi&gl=VN&ceid=VN:vi", True),  # Google News tiếng Việt, từ khóa AI
+    ("https://news.google.com/rss/search?q=Gemini%20Google%20AI&hl=vi&gl=VN&ceid=VN:vi", True),  # Google News tiếng Việt, từ khóa Gemini
 ]
 
-# Từ khóa dùng để lọc tin AI từ các nguồn công nghệ nói chung
-AI_KEYWORDS = [
-    "ai", "trí tuệ nhân tạo", "chatbot", "machine learning",
-    "học máy", "gpt", "claude", "gemini", "openai", "anthropic",
-    "deepseek", "llm", "mô hình ngôn ngữ", "generative ai",
+# Chỉ lấy tin có nhắc đến Gemini (không lấy AI nói chung nữa)
+GEMINI_KEYWORDS = [
+    "gemini", "google ai", "google deepmind", "bard",
 ]
 
 HOURS_LOOKBACK = 24  # chỉ lấy tin trong N giờ gần nhất
 MAX_ITEMS = 15        # giới hạn số tin đưa vào tóm tắt
 
 
-def is_ai_related(title, summary):
+def is_gemini_related(title, summary):
     text = f"{title} {summary}".lower()
-    return any(kw in text for kw in AI_KEYWORDS)
+    return any(kw in text for kw in GEMINI_KEYWORDS)
+
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
+# Model Gemini dùng để tóm tắt (có thể đổi sang phiên bản khác nếu muốn)
+GEMINI_MODEL = "gemini-2.5-flash"
 
 
 def fetch_recent_entries():
-    """Lấy các bài viết mới trong HOURS_LOOKBACK giờ qua từ mọi feed."""
+    """Lấy các bài viết mới trong HOURS_LOOKBACK giờ qua, chỉ giữ tin về Gemini."""
     cutoff = datetime.now(timezone.utc) - timedelta(hours=HOURS_LOOKBACK)
     entries = []
 
-    for url, is_dedicated in RSS_FEEDS:
+    for url, _is_dedicated in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
         except Exception as e:
@@ -83,8 +87,8 @@ def fetch_recent_entries():
             title = e.get("title", "").strip()
             summary_raw = e.get("summary", "")[:500]
 
-            # Với feed công nghệ nói chung, chỉ giữ tin liên quan đến AI
-            if not is_dedicated and not is_ai_related(title, summary_raw):
+            # Chỉ giữ tin liên quan đến Gemini
+            if not is_gemini_related(title, summary_raw):
                 continue
 
             entries.append({
@@ -100,54 +104,53 @@ def fetch_recent_entries():
     return entries[:MAX_ITEMS]
 
 
-def summarize_with_claude(entries):
-    """Dùng Claude API để tóm tắt gọn các tin thành bản tin ngắn."""
+def summarize_with_gemini(entries):
+    """Dùng Gemini API để tóm tắt gọn các tin thành bản tin ngắn."""
     if not entries:
-        return "Hôm nay không có tin AI mới đáng chú ý."
+        return "Hôm nay không có tin mới về Gemini đáng chú ý."
 
     raw_text = "\n\n".join(
         f"- {e['title']} ({e['source']})\n  {e['summary']}\n  {e['link']}"
         for e in entries
     )
 
-    if not ANTHROPIC_API_KEY:
+    if not GEMINI_API_KEY:
         # Không có API key -> chỉ liệt kê gọn, không tóm tắt bằng AI
         lines = [f"📰 *{e['title']}*\n{e['source']} — {e['link']}" for e in entries]
-        return "🗞 Tin AI hôm nay:\n\n" + "\n\n".join(lines)
+        return "🗞 Tin về Gemini hôm nay:\n\n" + "\n\n".join(lines)
 
     try:
         resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+            headers={"content-type": "application/json"},
+            params={"key": GEMINI_API_KEY},
             json={
-                "model": "claude-sonnet-4-5",
-                "max_tokens": 800,
-                "messages": [{
-                    "role": "user",
-                    "content": (
-                        "Tóm tắt các tin tức AI dưới đây thành một bản tin ngắn "
-                        "gọn bằng tiếng Việt, nhóm theo chủ đề, mỗi tin 1-2 câu, "
-                        "kèm link nguồn. Định dạng Markdown đơn giản (dùng * cho in đậm):\n\n"
-                        + raw_text
-                    ),
+                "contents": [{
+                    "parts": [{
+                        "text": (
+                            "Tóm tắt các tin tức về Google Gemini dưới đây thành "
+                            "một bản tin ngắn gọn bằng tiếng Việt, nhóm theo chủ đề, "
+                            "mỗi tin 1-2 câu, kèm link nguồn. Định dạng Markdown đơn "
+                            "giản (dùng * cho in đậm):\n\n" + raw_text
+                        )
+                    }]
                 }],
+                "generationConfig": {"maxOutputTokens": 800},
             },
             timeout=60,
         )
         resp.raise_for_status()
         data = resp.json()
-        return "".join(
-            block.get("text", "") for block in data.get("content", [])
-            if block.get("type") == "text"
-        ).strip() or "Không tạo được bản tóm tắt."
+        candidates = data.get("candidates", [])
+        if not candidates:
+            raise ValueError("Không có candidate nào trong phản hồi Gemini")
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text = "".join(p.get("text", "") for p in parts).strip()
+        return text or "Không tạo được bản tóm tắt."
     except Exception as e:
-        print(f"[warn] Lỗi khi gọi Claude API: {e}")
+        print(f"[warn] Lỗi khi gọi Gemini API: {e}")
         lines = [f"📰 *{e['title']}*\n{e['source']} — {e['link']}" for e in entries]
-        return "🗞 Tin AI hôm nay (chưa tóm tắt được):\n\n" + "\n\n".join(lines)
+        return "🗞 Tin về Gemini hôm nay (chưa tóm tắt được):\n\n" + "\n\n".join(lines)
 
 
 def send_to_telegram(text):
@@ -175,8 +178,8 @@ def send_to_telegram(text):
 def main():
     today = datetime.now().strftime("%d/%m/%Y")
     entries = fetch_recent_entries()
-    summary = summarize_with_claude(entries)
-    message = f"🤖 *Bản tin AI ngày {today}*\n\n{summary}"
+    summary = summarize_with_gemini(entries)
+    message = f"✨ *Bản tin Gemini ngày {today}*\n\n{summary}"
     send_to_telegram(message)
     print("Đã gửi bản tin thành công.")
 
