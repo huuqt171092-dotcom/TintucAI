@@ -1,8 +1,9 @@
 """
-Gemini News Daily Bot
-----------------------
-Lấy tin tức về Google Gemini mới nhất (24h qua) từ các nguồn RSS tiếng Việt
-uy tín, tóm tắt bằng Gemini API, rồi gửi kết quả vào Telegram của bạn.
+Gemini & Claude Feature News Daily Bot
+---------------------------------------
+Lấy tin tức về tính năng mới của Google Gemini và Anthropic Claude (48h qua)
+từ các nguồn uy tín (cả tiếng Việt và quốc tế), tóm tắt lại bằng tiếng Việt
+qua Gemini API, rồi gửi vào Telegram của bạn.
 
 Không dùng Facebook vì:
 - Facebook không cho phép bot tự động đăng nhập / cào News Feed cá nhân
@@ -28,43 +29,47 @@ import requests
 import feedparser
 from datetime import datetime, timedelta, timezone
 
-# ---------- Cấu hình nguồn tin (tiếng Việt) ----------
+# ---------- Cấu hình nguồn tin ----------
 # Mỗi mục: (url_feed, da_chuyen_ve_AI)
-# - da_chuyen_ve_AI=True  -> feed đã chuyên về AI, cần lọc theo từ khóa Gemini
-# - da_chuyen_ve_AI=False -> feed công nghệ nói chung, cũng lọc theo từ khóa Gemini
-# (mọi feed đều được lọc lại theo GEMINI_KEYWORDS bên dưới, is_dedicated chỉ
-#  còn ý nghĩa tham khảo, giữ lại để dễ mở rộng sau này)
+# - da_chuyen_ve_AI=True  -> feed đã chuyên về AI, chỉ cần lọc từ khóa Gemini/Claude
+# - da_chuyen_ve_AI=False -> feed công nghệ nói chung, lọc từ khóa Gemini/Claude
 RSS_FEEDS = [
-    ("https://genk.vn/rss/ai.rss", True),                        # GenK - chuyên mục AI
-    ("https://vnexpress.net/rss/khoa-hoc-cong-nghe.rss", False), # VnExpress Khoa học công nghệ
-    ("https://tinhte.vn/rss/", False),                            # Tinh Tế
-    ("https://news.google.com/rss/search?q=Gemini%20Google%20AI&hl=vi&gl=VN&ceid=VN:vi", True),  # Google News tiếng Việt, từ khóa Gemini
+    # Nguồn tiếng Việt
+    ("https://genk.vn/rss/ai.rss", True),
+    ("https://vnexpress.net/rss/khoa-hoc-cong-nghe.rss", False),
+    ("https://tinhte.vn/rss/", False),
+    ("https://news.google.com/rss/search?q=Gemini%20OR%20Claude%20AI&hl=vi&gl=VN&ceid=VN:vi", True),
+    # Nguồn quốc tế uy tín (sẽ được Gemini dịch và tóm tắt sang tiếng Việt)
+    ("https://techcrunch.com/category/artificial-intelligence/feed/", True),
+    ("https://venturebeat.com/category/ai/feed/", True),
+    ("https://www.theverge.com/rss/ai-artificial-intelligence/index.xml", True),
+    ("https://news.google.com/rss/search?q=Gemini%20OR%20Claude%20AI%20feature&hl=en-US&gl=US&ceid=US:en", True),
 ]
 
-# Chỉ lấy tin có nhắc đến Gemini (không lấy AI nói chung nữa)
-GEMINI_KEYWORDS = [
+# Chỉ lấy tin có nhắc đến Gemini hoặc Claude (các sản phẩm AI liên quan)
+TOPIC_KEYWORDS = [
     "gemini", "google ai", "google deepmind", "bard",
+    "claude", "anthropic", "sonnet", "opus", "haiku",
 ]
 
-HOURS_LOOKBACK = 24  # chỉ lấy tin trong N giờ gần nhất
-MAX_ITEMS = 15        # giới hạn số tin đưa vào tóm tắt
+HOURS_LOOKBACK = 48   # mở rộng lên 48h để có đủ tin (thay vì 24h)
+MAX_ITEMS = 20         # lấy nhiều hơn để lọc, tóm tắt sẽ rút gọn còn ~10 tin
 
 
-def is_gemini_related(title, summary):
+def is_topic_related(title, summary):
     text = f"{title} {summary}".lower()
-    return any(kw in text for kw in GEMINI_KEYWORDS)
+    return any(kw in text for kw in TOPIC_KEYWORDS)
 
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# Model Gemini dùng để tóm tắt (có thể đổi sang phiên bản khác nếu muốn)
 GEMINI_MODEL = "gemini-2.5-flash"
 
 
 def fetch_recent_entries():
-    """Lấy các bài viết mới trong HOURS_LOOKBACK giờ qua, chỉ giữ tin về Gemini."""
+    """Lấy các bài viết mới trong HOURS_LOOKBACK giờ qua, chỉ giữ tin về Gemini/Claude."""
     cutoff = datetime.now(timezone.utc) - timedelta(hours=HOURS_LOOKBACK)
     entries = []
 
@@ -87,8 +92,7 @@ def fetch_recent_entries():
             title = e.get("title", "").strip()
             summary_raw = e.get("summary", "")[:500]
 
-            # Chỉ giữ tin liên quan đến Gemini
-            if not is_gemini_related(title, summary_raw):
+            if not is_topic_related(title, summary_raw):
                 continue
 
             entries.append({
@@ -99,15 +103,22 @@ def fetch_recent_entries():
                 "published": published,
             })
 
-    # Mới nhất trước, giới hạn số lượng
-    entries.sort(key=lambda x: x["published"], reverse=True)
-    return entries[:MAX_ITEMS]
+    # Loại bỏ trùng lặp theo link, mới nhất trước, giới hạn số lượng
+    seen_links = set()
+    unique_entries = []
+    for e in sorted(entries, key=lambda x: x["published"], reverse=True):
+        if e["link"] in seen_links:
+            continue
+        seen_links.add(e["link"])
+        unique_entries.append(e)
+
+    return unique_entries[:MAX_ITEMS]
 
 
 def summarize_with_gemini(entries):
-    """Dùng Gemini API để tóm tắt gọn các tin thành bản tin ngắn."""
+    """Dùng Gemini API để tóm tắt thành bản tin ~10 tin bằng tiếng Việt."""
     if not entries:
-        return "Hôm nay không có tin mới về Gemini đáng chú ý."
+        return "Hôm nay không có tin mới về Gemini hoặc Claude đáng chú ý."
 
     raw_text = "\n\n".join(
         f"- {e['title']} ({e['source']})\n  {e['summary']}\n  {e['link']}"
@@ -115,9 +126,8 @@ def summarize_with_gemini(entries):
     )
 
     if not GEMINI_API_KEY:
-        # Không có API key -> chỉ liệt kê gọn, không tóm tắt bằng AI
         lines = [f"📰 *{e['title']}*\n{e['source']} — {e['link']}" for e in entries]
-        return "🗞 Tin về Gemini hôm nay:\n\n" + "\n\n".join(lines)
+        return "🗞 Tin về Gemini & Claude hôm nay:\n\n" + "\n\n".join(lines)
 
     try:
         resp = requests.post(
@@ -128,19 +138,27 @@ def summarize_with_gemini(entries):
                 "contents": [{
                     "parts": [{
                         "text": (
-                            "Tóm tắt các tin tức về Google Gemini dưới đây thành "
-                            "một bản tin ngắn gọn bằng tiếng Việt, nhóm theo chủ đề, "
-                            "mỗi tin 1-2 câu, kèm link nguồn. Định dạng Markdown đơn "
-                            "giản (dùng * cho in đậm):\n\n" + raw_text
+                            "Bạn là biên tập viên công nghệ. Dưới đây là danh sách tin tức "
+                            "thô (có thể bằng tiếng Anh hoặc tiếng Việt) về các tính năng, "
+                            "cập nhật của Google Gemini và Anthropic Claude.\n\n"
+                            "Hãy viết lại thành một bản tin khoảng 10 mục bằng TIẾNG VIỆT, "
+                            "mỗi mục gồm:\n"
+                            "1. Tiêu đề ngắn gọn (in đậm bằng *...*)\n"
+                            "2. Tóm tắt 1-2 câu về tính năng/thông tin chính\n"
+                            "3. Link nguồn ở cuối mỗi mục\n\n"
+                            "Nhóm theo Gemini và Claude nếu có thể. Nếu số tin ít hơn 10, "
+                            "cứ liệt kê hết những gì có, không cần bịa thêm tin. "
+                            "Bỏ qua tin trùng lặp nội dung. Định dạng Markdown đơn giản:\n\n"
+                            + raw_text
                         )
                     }]
                 }],
                 "generationConfig": {
-                    "maxOutputTokens": 2048,
+                    "maxOutputTokens": 3000,
                     "thinkingConfig": {"thinkingBudget": 0},
                 },
             },
-            timeout=60,
+            timeout=90,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -153,7 +171,7 @@ def summarize_with_gemini(entries):
     except Exception as e:
         print(f"[warn] Lỗi khi gọi Gemini API: {e}")
         lines = [f"📰 *{e['title']}*\n{e['source']} — {e['link']}" for e in entries]
-        return "🗞 Tin về Gemini hôm nay (chưa tóm tắt được):\n\n" + "\n\n".join(lines)
+        return "🗞 Tin về Gemini & Claude hôm nay (chưa tóm tắt được):\n\n" + "\n\n".join(lines)
 
 
 def send_to_telegram(text):
@@ -163,7 +181,6 @@ def send_to_telegram(text):
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
-    # Telegram giới hạn ~4096 ký tự/tin nhắn -> chia nhỏ nếu cần
     chunks = [text[i:i + 3500] for i in range(0, len(text), 3500)] or [text]
 
     for chunk in chunks:
@@ -182,7 +199,7 @@ def main():
     today = datetime.now().strftime("%d/%m/%Y")
     entries = fetch_recent_entries()
     summary = summarize_with_gemini(entries)
-    message = f"✨ *Bản tin Gemini ngày {today}*\n\n{summary}"
+    message = f"✨ *Bản tin Gemini & Claude ngày {today}*\n\n{summary}"
     send_to_telegram(message)
     print("Đã gửi bản tin thành công.")
 
